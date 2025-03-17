@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>TEA Encrypt CLI (Pure Rust) — README</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 800px;
+      margin: 2rem auto;
+      line-height: 1.6;
+    }
+    code, pre {
+      background: #f8f8f8;
+      border: 1px solid #e1e1e1;
+      border-radius: 4px;
+      padding: 0.25em 0.5em;
+      font-family: Consolas, monospace;
+    }
+    pre {
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      padding: 1em;
+    }
+    h1, h2, h3 {
+      margin-top: 2rem;
+      margin-bottom: 1rem;
+    }
+    hr {
+      margin: 2rem 0;
+    }
+  </style>
+</head>
+<body>
+
+<h1>TEA Encrypt CLI (Pure Rust)</h1>
+
+<p>
+  This is a simple command-line utility written in <strong>pure Rust</strong> (with no external dependencies) 
+  that encrypts or decrypts files in place using the 
+  <a href="https://en.wikipedia.org/wiki/Tiny_Encryption_Algorithm" target="_blank">Tiny Encryption Algorithm (TEA)</a>.
+</p>
+
+<hr>
+
+<h2>Important Security Notes</h2>
+<ul>
+  <li>
+    <strong>Not Secure for Production:</strong> TEA (especially in this unmodified, “vanilla” form) is considered 
+    <em>insecure</em> by modern standards. Attacks against TEA in ECB mode are feasible.
+  </li>
+  <li>
+    <strong>ECB Mode Issues:</strong> This example effectively uses TEA in an ECB-like mode without randomization or 
+    authentication. This leaks patterns in the plaintext and provides no integrity checks.
+  </li>
+  <li>
+    <strong>No Key Derivation or IV:</strong> This code uses a user-provided 128-bit key (16 bytes in hex) directly 
+    and does not incorporate salt, IVs, or proper key derivation (e.g., PBKDF2 or Argon2).
+  </li>
+  <li>
+    <strong>Use Well-Vetted Libraries Instead:</strong> For real-world encryption, use 
+    <a href="https://github.com/RustCrypto" target="_blank">RustCrypto</a> crates or 
+    <a href="https://crates.io/crates/ring" target="_blank">ring</a> with authenticated modes like AES-GCM.
+  </li>
+</ul>
+
+<hr>
+
+<h2>How to Build</h2>
+<pre><code>git clone https://github.com/your-repo/tea-encrypt-cli.git
+cd tea-encrypt-cli
+cargo build --release
+</code></pre>
+
+<p>
+  This will generate a binary named <code>tea-encrypt-cli</code> in the 
+  <code>target/release/</code> directory.
+</p>
+
+<hr>
+
+<h2>Usage</h2>
+<p>
+  The command requires three arguments:
+</p>
+
+<ol>
+  <li>Operation mode: <code>encrypt</code> or <code>decrypt</code>.</li>
+  <li>Path to the target file (input and output are the same file).</li>
+  <li>A 16-byte key represented as a 32-character hex string (128 bits).</li>
+</ol>
+
+<p>
+  <strong>Example encryption command:</strong>
+</p>
+<pre><code>./target/release/tea-encrypt-cli encrypt &lt;filename&gt; 0123456789ABCDEF0123456789ABCDEF
+</code></pre>
+
+<ul>
+  <li>This reads &lt;filename&gt; into memory, zero-pads it to a multiple of 8 bytes, and encrypts in place.</li>
+  <li>The new ciphertext overwrites the original file.</li>
+</ul>
+
+<p>
+  <strong>Example decryption command:</strong>
+</p>
+<pre><code>./target/release/tea-encrypt-cli decrypt &lt;filename&gt; 0123456789ABCDEF0123456789ABCDEF
+</code></pre>
+
+<ul>
+  <li>This reads the (encrypted) &lt;filename&gt;, decrypts it in place, and overwrites it with the recovered plaintext.</li>
+</ul>
+
+<hr>
+
+<h2>Key Handling</h2>
+<p>
+  The code expects a 16-byte (128-bit) key expressed as 32 hex characters. Example:
+</p>
+<pre><code>0123456789ABCDEF0123456789ABCDEF
+</code></pre>
+<p>
+  The function <code>hex_string_to_16_bytes</code> parses this string and 
+  <code>bytes_to_key</code> interprets those bytes as four 32-bit words in big-endian order for TEA.
+</p>
+
+<hr>
+
+<h2>Minimal Code Example</h2>
+
+<pre><code>// main.rs
+
+use std::env;
+use std::fs::{File, read};
+use std::io::{Write, BufWriter};
+use std::process;
+
+// -- TEA implementation omitted for brevity --
+//
+// See the repository for the full code (including tea_encrypt_block, tea_decrypt_block,
+// zero_pad_to_block_size, etc.).
+
+fn main() {
+    // CLI usage: tea-encrypt-cli &lt;encrypt|decrypt&gt; &lt;filename&gt; &lt;16-byte-hex-key&gt;
+    let args: Vec&lt;String&gt; = env::args().collect();
+    if args.len() != 4 {
+        eprintln!("Usage: {} &lt;encrypt|decrypt&gt; &lt;filename&gt; &lt;16-byte-hex-key&gt;", args[0]);
+        process::exit(1);
+    }
+
+    let mode = &args[1];
+    let filename = &args[2];
+    let key_hex = &args[3];
+
+    let key_bytes = match hex_string_to_16_bytes(key_hex) {
+        Ok(k) =&gt; k,
+        Err(e) =&gt; {
+            eprintln!("Invalid 16-byte hex key: {}", e);
+            process::exit(1);
+        }
+    };
+
+    let key = bytes_to_key(&key_bytes);
+
+    // Read file
+    let file_data = match read(filename) {
+        Ok(d) =&gt; d,
+        Err(e) =&gt; {
+            eprintln!("Failed to read file {}: {}", filename, e);
+            process::exit(1);
+        }
+    };
+
+    // Zero-pad if encrypting
+    let mut data = if mode == "encrypt" {
+        zero_pad_to_block_size(file_data)
+    } else {
+        file_data
+    };
+
+    // Encrypt or decrypt
+    match mode.as_str() {
+        "encrypt" =&gt; encrypt_data(&mut data, &key),
+        "decrypt" =&gt; decrypt_data(&mut data, &key),
+        _ =&gt; {
+            eprintln!("Invalid mode: {}", mode);
+            process::exit(1);
+        }
+    }
+
+    // Overwrite the file
+    let out_file = match File::create(filename) {
+        Ok(f) =&gt; f,
+        Err(e) =&gt; {
+            eprintln!("Failed to open output file {}: {}", filename, e);
+            process::exit(1);
+        }
+    };
+    let mut writer = BufWriter::new(out_file);
+    if let Err(e) = writer.write_all(&data) {
+        eprintln!("Failed to write output: {}", e);
+        process::exit(1);
+    }
+
+    println!("Operation '{}' completed on file '{}'", mode, filename);
+}
+</code></pre>
+
+<hr>
+
+<h2>License &amp; Disclaimer</h2>
+<p>
+  <strong>Disclaimer:</strong> This is purely an educational and demonstrative tool. 
+  TEA is <em>not</em> secure by modern standards, and this code is not intended for 
+  use in production. Use it at your own risk.
+</p>
+<p>
+  You are free to reuse or modify this code. Refer to the repository for the 
+  exact license information.
+</p>
+
+</body>
+</html>
+
